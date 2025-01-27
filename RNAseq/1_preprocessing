@@ -1,0 +1,40 @@
+------------------------------------------------------------------------------------
+# Aim: preprocessing of 150-nt pair-end RNA-seq data for further analysis
+# Author: Dae Kwan Ko (dkko@msu.edu)
+# Last modified: 01-27-2025
+# Usage: Preprocessing of sequencing files  
+#------------------------------------------------------------------------------------
+
+Step 1: unzip
+# unzip fastq files
+gzip -d ${INPUT}
+
+Step 2: split PE reads into R1 and R2
+# JGI provided merged PE reads, which need to be split into R1 and R2
+sed -ne '1~8p;2~8p;3~8p;4~8p' ${INPUT} > ${OUTPUT}
+sed -ne '5~8p;6~8p;7~8p;8~8p' ${INPUT} > ${OUTPUT}
+
+Step 3: count
+# count the number of raw reads
+wc -l ${INPUT} > ${OUTPUT}
+
+Step 4: compress
+# compress R1/R2 raw files
+gzip ${INPUT}
+
+Step 5: adapter trimming (Cutadapt)
+# Trim adapters from the sequencing reads
+cutadapt -f fastq -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC -A AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTAGATCTCGGTGGTCGCCGTATCATT -q 20 -m 30 \
+-o ${OUTPUT1} -p ${OUTPUT2} ${INPUT1} ${INPUT2}
+
+Step 6: count reads of cleaned files
+# Count the number of lines in the cleaned FASTQ file
+wc -l ${INPUT} > ${OUTPUT}
+
+Step 7: quality control on cleaned files (FastQC)
+# Perform quality control on the cleaned FASTQ file
+fastqc -o ${OUTPUT} -f fastq ${INPUT}
+
+Step 8: compressed cleaned files
+# Compress cleaned files to save space
+gzip ${INPUT}

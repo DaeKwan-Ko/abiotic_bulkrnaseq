@@ -1,0 +1,45 @@
+#------------------------------------------------------------------------------------
+# Aim: mapping of cleaned 150-nt single-end stranded RNA-seq data to the TAIR10 genome and calculate FPKM
+# Author: Dae Kwan Ko (dkko@msu.edu)
+# Last modified: 01-27-2025
+# Usage: shown below
+#------------------------------------------------------------------------------------
+
+Step 1: index TAIR10 (chr only) using bowtie2.2.3
+# build index of sorghum_v3.1.1 for bowtie 2
+bowtie2-build -f ${INPUT} ${OUTPUT}
+
+Step 2: mapping
+# mapping to the TAIR10 genome using tophat2 (+ bowtie2)
+tophat2 -o ${OUTPUT} -I 30000 -i 10 -p 5 \
+-G /mnt/home/dkko/genomes/sorghum_v3.1.1/Sbicolor_454_v3.1.1.gene.gff3 \
+--library-type fr-firststrand \
+/mnt/home/dkko/genomes/sorghum_v3.1.1/Sbicolor_454_v3.0.1 \
+${INPUT1} ${INPUT2}
+
+Step 3: sort
+# sort bam files
+samtools sort -o ${OUTPUT} -@ 5 ${INPUT} 
+
+Step 4: index
+# index accepted_hits.sort.bam
+samtools index ${INPUT}
+
+Step 5: Quantification
+# calculate fpkm using cufflinks
+cufflinks -G ${GFF} -b ${GENOME} --library-type fr-firststrand -q -I 30000 -o ${OUTPUT} ${INPUT}
+
+Step 6: raw read counts
+# read counts using htseq for DESeq2
+htseq-count --format=bam \
+--idattr=ID \
+--order=pos \
+--stranded=reverse \
+--minaqual=10 \
+--mode=union \
+--type=gene \
+${INPUT} ${GFF} > ${OUTPUT}
+
+Step 7: coverage 
+#  generate tdf files for the visualization in IGV
+igvtools count -w 5 ${INPUT} ${OUTPUT} tair10

@@ -1,0 +1,902 @@
+#------------------------------------------------------------------------------------
+Differential gene expression analysis using DESeq2
+Input data: raw read count files generated using htseq-count
+Author: Dae Kwan Ko (dkko@msu.edu)
+Last Modified: 2025-01-27
+Overview: This repository presents the scripts used for the differential gene expression analysis using DESeq2.
+#------------------------------------------------------------------------------------
+
+## R Markdown
+
+```{r loadLibs}
+rm(list=ls()) # Remove everything from the R environment. Important if you have some variables saved already
+require(limma)
+require(edgeR)
+require(DESeq2)
+require(RColorBrewer)
+require(gplots)
+require(ggplot2)
+require(apeglm)
+require(FactoMineR)
+require(factoextra)
+require(digest)
+require(dplyr)
+```
+
+```{r fileprep}
+rm(list=ls())
+myFiles <- list.files(pattern = glob2rx("*htseq.txt"), 
+                      all.files = T, 
+                      full.names = F) # Create a vector containing the names of your files
+myFiles
+myData <- lapply(myFiles, # Use list apply to apply the native R functi on read.table() to myFiles
+                 read.table, colClasses=c("character", "numeric"))
+myData
+
+# Name the elements of myData
+names(myData) <-c("C_06_R1","C_06_R2","C_06_R3","C_06_S1","C_06_S2","C_06_S3", 
+                  "C_24_R1",          "C_24_R3","C_24_S1","C_24_S2","C_24_S3",
+                  "C_48_R1","C_48_R2","C_48_R3","C_48_S1","C_48_S2","C_48_S3", 
+                  "C_72_R1","C_72_R2","C_72_R3","C_72_S1","C_72_S2","C_72_S3",
+                  "D_06_R1","D_06_R2","D_06_R3","D_06_S1","D_06_S2","D_06_S3", 
+                  "D_24_R1","D_24_R2","D_24_R3","D_24_S1","D_24_S2","D_24_S3",
+                  "D_48_R1","D_48_R2","D_48_R3","D_48_S1","D_48_S2","D_48_S3", 
+                  "D_72_R1","D_72_R2","D_72_R3","D_72_S1","D_72_S2","D_72_S3",
+                  "H_06_R1","H_06_R2","H_06_R3","H_06_S1","H_06_S2","H_06_S3", 
+                  "H_24_R1","H_24_R2","H_24_R3","H_24_S1","H_24_S2","H_24_S3",
+                  "H_48_R1","H_48_R2","H_48_R3","H_48_S1","H_48_S2","H_48_S3",           
+                            "H_72_R2","H_72_R3","H_72_S1","H_72_S2","H_72_S3",
+                  "S_06_R1","S_06_R2","S_06_R3","S_06_S1","S_06_S2","S_06_S3", 
+                  "S_24_R1","S_24_R2","S_24_R3","S_24_S1","S_24_S2","S_24_S3",
+                  "S_48_R1","S_48_R2","S_48_R3","S_48_S1","S_48_S2","S_48_S3", 
+                  "S_72_R1","S_72_R2","S_72_R3","S_72_S1","S_72_S2","S_72_S3")
+summary(myData)
+head(myData$C_06_R1)
+tail(myData$C_06_R1)
+rmLines <- function(x){x <- x[1:34129,]}
+myData <- lapply(myData, rmLines)
+nrow(myData$C_06_R1)
+counts <- data.frame(row.names=myData$C_06_R1[,1],
+                     C_06_R1=myData$C_06_R1[,2], C_06_R2=myData$C_06_R2[,2], C_06_R3=myData$C_06_R3[,2], C_06_S1=myData$C_06_S1[,2], C_06_S2=myData$C_06_S2[,2], C_06_S3=myData$C_06_S3[,2],
+                     C_24_R1=myData$C_24_R1[,2],                             C_24_R3=myData$C_24_R3[,2], C_24_S1=myData$C_24_S1[,2], C_24_S2=myData$C_24_S2[,2], C_24_S3=myData$C_24_S3[,2],
+                     C_48_R1=myData$C_48_R1[,2], C_48_R2=myData$C_48_R2[,2], C_48_R3=myData$C_48_R3[,2], C_48_S1=myData$C_48_S1[,2], C_48_S2=myData$C_48_S2[,2], C_48_S3=myData$C_48_S3[,2],
+                     C_72_R1=myData$C_72_R1[,2], C_72_R2=myData$C_72_R2[,2], C_72_R3=myData$C_72_R3[,2], C_72_S1=myData$C_72_S1[,2], C_72_S2=myData$C_72_S2[,2], C_72_S3=myData$C_72_S3[,2],
+                     D_06_R1=myData$D_06_R1[,2], D_06_R2=myData$D_06_R2[,2], D_06_R3=myData$D_06_R3[,2], D_06_S1=myData$D_06_S1[,2], D_06_S2=myData$D_06_S2[,2], D_06_S3=myData$D_06_S3[,2],
+                     D_24_R1=myData$D_24_R1[,2], D_24_R2=myData$D_24_R2[,2], D_24_R3=myData$D_24_R3[,2], D_24_S1=myData$D_24_S1[,2], D_24_S2=myData$D_24_S2[,2], D_24_S3=myData$D_24_S3[,2],
+                     D_48_R1=myData$D_48_R1[,2], D_48_R2=myData$D_48_R2[,2], D_48_R3=myData$D_48_R3[,2], D_48_S1=myData$D_48_S1[,2], D_48_S2=myData$D_48_S2[,2], D_48_S3=myData$D_48_S3[,2],
+                     D_72_R1=myData$D_72_R1[,2], D_72_R2=myData$D_72_R2[,2], D_72_R3=myData$D_72_R3[,2], D_72_S1=myData$D_72_S1[,2], D_72_S2=myData$D_72_S2[,2], D_72_S3=myData$D_72_S3[,2],
+                     H_06_R1=myData$H_06_R1[,2], H_06_R2=myData$H_06_R2[,2], H_06_R3=myData$H_06_R3[,2], H_06_S1=myData$H_06_S1[,2], H_06_S2=myData$H_06_S2[,2], H_06_S3=myData$H_06_S3[,2],
+                     H_24_R1=myData$H_24_R1[,2], H_24_R2=myData$H_24_R2[,2], H_24_R3=myData$H_24_R3[,2], H_24_S1=myData$H_24_S1[,2], H_24_S2=myData$H_24_S2[,2], H_24_S3=myData$H_24_S3[,2],
+                     H_48_R1=myData$H_48_R1[,2], H_48_R2=myData$H_48_R2[,2], H_48_R3=myData$H_48_R3[,2], H_48_S1=myData$H_48_S1[,2], H_48_S2=myData$H_48_S2[,2], H_48_S3=myData$H_48_S3[,2],
+                                                 H_72_R2=myData$H_72_R2[,2], H_72_R3=myData$H_72_R3[,2], H_72_S1=myData$H_72_S1[,2], H_72_S2=myData$H_72_S2[,2], H_72_S3=myData$H_72_S3[,2],
+                     S_06_R1=myData$S_06_R1[,2], S_06_R2=myData$S_06_R2[,2], S_06_R3=myData$S_06_R3[,2], S_06_S1=myData$S_06_S1[,2], S_06_S2=myData$S_06_S2[,2], S_06_S3=myData$S_06_S3[,2],
+                     S_24_R1=myData$S_24_R1[,2], S_24_R2=myData$S_24_R2[,2], S_24_R3=myData$S_24_R3[,2], S_24_S1=myData$S_24_S1[,2], S_24_S2=myData$S_24_S2[,2], S_24_S3=myData$S_24_S3[,2],
+                     S_48_R1=myData$S_48_R1[,2], S_48_R2=myData$S_48_R2[,2], S_48_R3=myData$S_48_R3[,2], S_48_S1=myData$S_48_S1[,2], S_48_S2=myData$S_48_S2[,2], S_48_S3=myData$S_48_S3[,2],
+                     S_72_R1=myData$S_72_R1[,2], S_72_R2=myData$S_72_R2[,2], S_72_R3=myData$S_72_R3[,2], S_72_S1=myData$S_72_S1[,2], S_72_S2=myData$S_72_S2[,2], S_72_S3=myData$S_72_S3[,2])
+head(counts)
+```
+
+```{r fileprep2}
+counts_D_06_R <- counts[,c("C_06_R1", "C_06_R2", "C_06_R3", "D_06_R1", "D_06_R2", "D_06_R3")]
+counts_D_06_S <- counts[,c("C_06_S1", "C_06_S2", "C_06_S3", "D_06_S1", "D_06_S2", "D_06_S3")]
+counts_D_24_R <- counts[,c("C_24_R1",            "C_24_R3", "D_24_R1", "D_24_R2", "D_24_R3")]
+counts_D_24_S <- counts[,c("C_24_S1", "C_24_S2", "C_24_S3", "D_24_S1", "D_24_S2", "D_24_S3")]
+counts_D_48_R <- counts[,c("C_48_R1", "C_48_R2", "C_48_R3", "D_48_R1", "D_48_R2", "D_48_R3")]
+counts_D_48_S <- counts[,c("C_48_S1", "C_48_S2", "C_48_S3", "D_48_S1", "D_48_S2", "D_48_S3")]
+counts_D_72_R <- counts[,c("C_72_R1", "C_72_R2", "C_72_R3", "D_72_R1", "D_72_R2", "D_72_R3")]
+counts_D_72_S <- counts[,c("C_72_S1", "C_72_S2", "C_72_S3", "D_72_S1", "D_72_S2", "D_72_S3")]
+
+# ctrl vs. heat
+counts_H_06_R <- counts[,c("C_06_R1", "C_06_R2", "C_06_R3", "H_06_R1", "H_06_R2", "H_06_R3")]
+counts_H_06_S <- counts[,c("C_06_S1", "C_06_S2", "C_06_S3", "H_06_S1", "H_06_S2", "H_06_S3")]
+counts_H_24_R <- counts[,c("C_24_R1",            "C_24_R3", "H_24_R1", "H_24_R2", "H_24_R3")]
+counts_H_24_S <- counts[,c("C_24_S1", "C_24_S2", "C_24_S3", "H_24_S1", "H_24_S2", "H_24_S3")]
+counts_H_48_R <- counts[,c("C_48_R1", "C_48_R2", "C_48_R3", "H_48_R1", "H_48_R2", "H_48_R3")]
+counts_H_48_S <- counts[,c("C_48_S1", "C_48_S2", "C_48_S3", "H_48_S1", "H_48_S2", "H_48_S3")]
+counts_H_72_R <- counts[,c("C_72_R1", "C_72_R2", "C_72_R3",            "H_72_R2", "H_72_R3")]
+counts_H_72_S <- counts[,c("C_72_S1", "C_72_S2", "C_72_S3", "H_72_S1", "H_72_S2", "H_72_S3")]
+
+# ctrl vs. salinity
+counts_S_06_R <- counts[,c("C_06_R1", "C_06_R2", "C_06_R3", "S_06_R1", "S_06_R2", "S_06_R1")]
+counts_S_06_S <- counts[,c("C_06_S1", "C_06_S2", "C_06_S3", "S_06_S1", "S_06_S2", "S_06_S3")]
+counts_S_24_R <- counts[,c("C_24_R1",            "C_24_R3", "S_24_R1", "S_24_R2", "S_24_R3")]
+counts_S_24_S <- counts[,c("C_24_S1", "C_24_S2", "C_24_S3", "S_24_S1", "S_24_S2", "S_24_S3")]
+counts_S_48_R <- counts[,c("C_48_R1", "C_48_R2", "C_48_R3", "S_48_R1", "S_48_R2", "S_48_R3")]
+counts_S_48_S <- counts[,c("C_48_S1", "C_48_S2", "C_48_S3", "S_48_S1", "S_48_S2", "S_48_S3")]
+counts_S_72_R <- counts[,c("C_72_R1", "C_72_R2", "C_72_R3", "S_72_R1", "S_72_R2", "S_72_R3")]
+counts_S_72_S <- counts[,c("C_72_S1", "C_72_S2", "C_72_S3", "S_72_S1", "S_72_S2", "S_72_S3")]
+
+# Evaluate the sum of each row and save to a new vector called geneTotals
+# ctrl vs. drought
+geneTotals_D_06_R <- rowSums(counts_D_06_R)
+geneTotals_D_06_S <- rowSums(counts_D_06_S)
+geneTotals_D_24_R <- rowSums(counts_D_24_R)
+geneTotals_D_24_S <- rowSums(counts_D_24_S)
+geneTotals_D_48_R <- rowSums(counts_D_48_R)
+geneTotals_D_48_S <- rowSums(counts_D_48_S)
+geneTotals_D_72_R <- rowSums(counts_D_72_R)
+geneTotals_D_72_S <- rowSums(counts_D_72_S)
+
+# ctrl vs. heat
+geneTotals_H_06_R <- rowSums(counts_H_06_R)
+geneTotals_H_06_S <- rowSums(counts_H_06_S)
+geneTotals_H_24_R <- rowSums(counts_H_24_R)
+geneTotals_H_24_S <- rowSums(counts_H_24_S)
+geneTotals_H_48_R <- rowSums(counts_H_48_R)
+geneTotals_H_48_S <- rowSums(counts_H_48_S)
+geneTotals_H_72_R <- rowSums(counts_H_72_R)
+geneTotals_H_72_S <- rowSums(counts_H_72_S)
+
+# ctrl vs. salinity
+geneTotals_S_06_R <- rowSums(counts_S_06_R)
+geneTotals_S_06_S <- rowSums(counts_S_06_S)
+geneTotals_S_24_R <- rowSums(counts_S_24_R)
+geneTotals_S_24_S <- rowSums(counts_S_24_S)
+geneTotals_S_48_R <- rowSums(counts_S_48_R)
+geneTotals_S_48_S <- rowSums(counts_S_48_S)
+geneTotals_S_72_R <- rowSums(counts_S_72_R)
+geneTotals_S_72_S <- rowSums(counts_S_72_S)
+
+# Genes with =< 100 reads in all samples together were discarded
+countsNonZero_D_06_R <- counts_D_06_R[geneTotals_D_06_R > 100,]
+countsNonZero_D_06_S <- counts_D_06_S[geneTotals_D_06_S > 100,]
+countsNonZero_D_24_R <- counts_D_24_R[geneTotals_D_24_R > 100,]
+countsNonZero_D_24_S <- counts_D_24_S[geneTotals_D_24_S > 100,]
+countsNonZero_D_48_R <- counts_D_48_R[geneTotals_D_48_R > 100,]
+countsNonZero_D_48_S <- counts_D_48_S[geneTotals_D_48_S > 100,]
+countsNonZero_D_72_R <- counts_D_72_R[geneTotals_D_72_R > 100,]
+countsNonZero_D_72_S <- counts_D_72_S[geneTotals_D_72_S > 100,]
+
+countsNonZero_H_06_R <- counts_H_06_R[geneTotals_H_06_R > 100,]
+countsNonZero_H_06_S <- counts_H_06_S[geneTotals_H_06_S > 100,]
+countsNonZero_H_24_R <- counts_H_24_R[geneTotals_H_24_R > 100,]
+countsNonZero_H_24_S <- counts_H_24_S[geneTotals_H_24_S > 100,]
+countsNonZero_H_48_R <- counts_H_48_R[geneTotals_H_48_R > 100,]
+countsNonZero_H_48_S <- counts_H_48_S[geneTotals_H_48_S > 100,]
+countsNonZero_H_72_R <- counts_H_72_R[geneTotals_H_72_R > 100,]
+countsNonZero_H_72_S <- counts_H_72_S[geneTotals_H_72_S > 100,]
+
+countsNonZero_S_06_R <- counts_S_06_R[geneTotals_S_06_R > 100,]
+countsNonZero_S_06_S <- counts_S_06_S[geneTotals_S_06_S > 100,]
+countsNonZero_S_24_R <- counts_S_24_R[geneTotals_S_24_R > 100,]
+countsNonZero_S_24_S <- counts_S_24_S[geneTotals_S_24_S > 100,]
+countsNonZero_S_48_R <- counts_S_48_R[geneTotals_S_48_R > 100,]
+countsNonZero_S_48_S <- counts_S_48_S[geneTotals_S_48_S > 100,]
+countsNonZero_S_72_R <- counts_S_72_R[geneTotals_S_72_R > 100,]
+countsNonZero_S_72_S <- counts_S_72_S[geneTotals_S_72_S > 100,]
+
+```
+
+
+
+```{r fileprep2}
+# See how many genes are left in the analysis
+nrow(countsNonZero_D_06_R) 
+nrow(countsNonZero_D_06_S) 
+nrow(countsNonZero_D_24_R) 
+nrow(countsNonZero_D_24_S) 
+nrow(countsNonZero_D_48_R)
+nrow(countsNonZero_D_48_S) 
+nrow(countsNonZero_D_72_R) 
+nrow(countsNonZero_D_72_S)
+
+nrow(countsNonZero_H_06_R) 
+nrow(countsNonZero_H_06_S) 
+nrow(countsNonZero_H_24_R) 
+nrow(countsNonZero_H_24_S) 
+nrow(countsNonZero_H_48_R)
+nrow(countsNonZero_H_48_S) 
+nrow(countsNonZero_H_72_R) 
+nrow(countsNonZero_H_72_S)
+ 
+nrow(countsNonZero_S_06_R) 
+nrow(countsNonZero_S_06_S) 
+nrow(countsNonZero_S_24_R) 
+nrow(countsNonZero_S_24_S) 
+nrow(countsNonZero_S_48_R)
+nrow(countsNonZero_S_48_S) 
+nrow(countsNonZero_S_72_R) 
+nrow(countsNonZero_S_72_S)
+
+treatments_def <- as.factor(c(rep("ctrl",3),rep("stress",3)))
+treatments_24R <- as.factor(c(rep("ctrl",2),rep("stress",3)))
+treatments_H72R <- as.factor(c(rep("ctrl",3),rep("stress",2)))
+
+design_def <- model.matrix(~treatments_def)
+design_24R <- model.matrix(~treatments_24R)
+design_H72R <- model.matrix(~treatments_H72R)
+
+dge <- DGEList(counts=countsNonZero_D_72_S, 
+               group=treatments_def, 
+               remove.zeros=T) 
+plotMDS(dge,main="MDS",pch = 19,
+        col=c(rep("black",3),rep("red",3)))
+```
+
+```{r DEDeq.object}
+# treatments was our column labels organized as factors
+colData_def <- DataFrame(treatments_def)
+colData_24R <- DataFrame(treatments_24R)
+colData_H72R <- DataFrame(treatments_H72R)
+
+# Take a look at the colData "data.frame" object.          
+colData_def
+
+# Compare to tissues object.
+treatments_def
+
+# Create the DESeq object from the counts matrix we made that has >100 exprssed genes, uses the new colData object we made to label the treatments, and the same experimental design using treatments as the nominal categories. 
+dds_D_06_R <- DESeqDataSetFromMatrix(countsNonZero_D_06_R, colData=colData_def, design=formula(~treatments_def))
+dds_D_06_S <- DESeqDataSetFromMatrix(countsNonZero_D_06_S, colData=colData_def, design=formula(~treatments_def))
+dds_D_24_R <- DESeqDataSetFromMatrix(countsNonZero_D_24_R, colData=colData_24R, design=formula(~treatments_24R))
+dds_D_24_S <- DESeqDataSetFromMatrix(countsNonZero_D_24_S, colData=colData_def, design=formula(~treatments_def))
+dds_D_48_R <- DESeqDataSetFromMatrix(countsNonZero_D_48_R, colData=colData_def, design=formula(~treatments_def))
+dds_D_48_S <- DESeqDataSetFromMatrix(countsNonZero_D_48_S, colData=colData_def, design=formula(~treatments_def))
+dds_D_72_R <- DESeqDataSetFromMatrix(countsNonZero_D_72_R, colData=colData_def, design=formula(~treatments_def))
+dds_D_72_S <- DESeqDataSetFromMatrix(countsNonZero_D_72_S, colData=colData_def, design=formula(~treatments_def))
+
+dds_H_06_R <- DESeqDataSetFromMatrix(countsNonZero_H_06_R, colData=colData_def, design=formula(~treatments_def))
+dds_H_06_S <- DESeqDataSetFromMatrix(countsNonZero_H_06_S, colData=colData_def, design=formula(~treatments_def))
+dds_H_24_R <- DESeqDataSetFromMatrix(countsNonZero_H_24_R, colData=colData_24R, design=formula(~treatments_24R))
+dds_H_24_S <- DESeqDataSetFromMatrix(countsNonZero_H_24_S, colData=colData_def, design=formula(~treatments_def))
+dds_H_48_R <- DESeqDataSetFromMatrix(countsNonZero_H_48_R, colData=colData_def, design=formula(~treatments_def))
+dds_H_48_S <- DESeqDataSetFromMatrix(countsNonZero_H_48_S, colData=colData_def, design=formula(~treatments_def))
+dds_H_72_R <- DESeqDataSetFromMatrix(countsNonZero_H_72_R, colData=colData_H72R, design=formula(~treatments_H72R))
+dds_H_72_S <- DESeqDataSetFromMatrix(countsNonZero_H_72_S, colData=colData_def, design=formula(~treatments_def))
+
+dds_S_06_R <- DESeqDataSetFromMatrix(countsNonZero_S_06_R, colData=colData_def, design=formula(~treatments_def))
+dds_S_06_S <- DESeqDataSetFromMatrix(countsNonZero_S_06_S, colData=colData_def, design=formula(~treatments_def))
+dds_S_24_R <- DESeqDataSetFromMatrix(countsNonZero_S_24_R, colData=colData_24R, design=formula(~treatments_24R))
+dds_S_24_S <- DESeqDataSetFromMatrix(countsNonZero_S_24_S, colData=colData_def, design=formula(~treatments_def))
+dds_S_48_R <- DESeqDataSetFromMatrix(countsNonZero_S_48_R, colData=colData_def, design=formula(~treatments_def))
+dds_S_48_S <- DESeqDataSetFromMatrix(countsNonZero_S_48_S, colData=colData_def, design=formula(~treatments_def))
+dds_S_72_R <- DESeqDataSetFromMatrix(countsNonZero_S_72_R, colData=colData_def, design=formula(~treatments_def))
+dds_S_72_S <- DESeqDataSetFromMatrix(countsNonZero_S_72_S, colData=colData_def, design=formula(~treatments_def))
+
+# Check the metadata on your DESeq data set object.
+dds_D_06_R
+dds_D_06_S
+dds_D_24_R
+dds_D_24_S
+dds_D_48_R
+dds_D_48_S
+dds_D_72_R
+dds_D_72_S
+
+dds_H_06_R
+dds_H_06_S
+dds_H_24_R
+dds_H_24_S
+dds_H_48_R
+dds_H_48_S
+dds_H_72_R
+dds_H_72_S
+
+dds_S_06_R
+dds_S_06_S
+dds_S_24_R
+dds_S_24_S
+dds_S_48_R
+dds_S_48_S
+dds_S_72_R
+dds_S_72_S
+
+# Estimate size factors to scale the columns of the count matrix, estimate dispersions, and fit model
+dds_D_06_R <- DESeq(dds_D_06_R)
+dds_D_06_S <- DESeq(dds_D_06_S)
+dds_D_24_R <- DESeq(dds_D_24_R)
+dds_D_24_S <- DESeq(dds_D_24_S)
+dds_D_48_R <- DESeq(dds_D_48_R)
+dds_D_48_S <- DESeq(dds_D_48_S)
+dds_D_72_R <- DESeq(dds_D_72_R)
+dds_D_72_S <- DESeq(dds_D_72_S)
+
+dds_H_06_R <- DESeq(dds_H_06_R)
+dds_H_06_S <- DESeq(dds_H_06_S)
+dds_H_24_R <- DESeq(dds_H_24_R)
+dds_H_24_S <- DESeq(dds_H_24_S)
+dds_H_48_R <- DESeq(dds_H_48_R)
+dds_H_48_S <- DESeq(dds_H_48_S)
+dds_H_72_R <- DESeq(dds_H_72_R)
+dds_H_72_S <- DESeq(dds_H_72_S)
+
+dds_S_06_R <- DESeq(dds_S_06_R)
+dds_S_06_S <- DESeq(dds_S_06_S)
+dds_S_24_R <- DESeq(dds_S_24_R)
+dds_S_24_S <- DESeq(dds_S_24_S)
+dds_S_48_R <- DESeq(dds_S_48_R)
+dds_S_48_S <- DESeq(dds_S_48_S)
+dds_S_72_R <- DESeq(dds_S_72_R)
+dds_S_72_S <- DESeq(dds_S_72_S)
+
+# To see the normalization factors:
+sizeFactors(dds_D_06_R)
+```
+
+```{r shrinking}
+# Look at the top level of the DESeq data set.
+slotNames(dds_D_06_R)
+slotNames(dds_D_06_S)
+slotNames(dds_D_24_R)
+slotNames(dds_D_24_S)
+slotNames(dds_D_48_R)
+slotNames(dds_D_48_S)
+slotNames(dds_D_72_R)
+slotNames(dds_D_72_S)
+
+slotNames(dds_H_06_R)
+slotNames(dds_H_06_S)
+slotNames(dds_H_24_R)
+slotNames(dds_H_24_S)
+slotNames(dds_H_48_R)
+slotNames(dds_H_48_S)
+slotNames(dds_H_72_R)
+slotNames(dds_H_72_S)
+
+slotNames(dds_S_06_R)
+slotNames(dds_S_06_S)
+slotNames(dds_S_24_R)
+slotNames(dds_S_24_S)
+slotNames(dds_S_48_R)
+slotNames(dds_S_48_S)
+slotNames(dds_S_72_R)
+slotNames(dds_S_72_S)
+
+dds_D_06_R@colData
+
+# Check out the structure of the DESeq data set.
+str(dds_D_06_R)
+
+# Plot gene dispersion correlations and other trends
+# Dispersion shows how much the variance for each gene deviates from the mean.
+geneDispersion_D_06_R <- dds_D_06_R@rowRanges@elementMetadata@listData$dispGeneEst
+
+treatments_D_06_R <- dds_D_06_R@rowRanges@elementMetadata@listData$treatments_def_stress_vs_ctrl
+
+# See how fold change corresponds to dispersion
+plot(treatments_D_06_R, geneDispersion_D_06_R, xlab="Fold change of expression (A/b)", 
+     ylab="Gene dispersion estimate", pch=19, cex=0.4)
+
+# Check the trend of normalized counts to see how it corresponds to the dispersion estimate.
+plotDispEsts(dds_D_06_R)
+
+# obtain results
+res_dds_D_06_R <- results(dds_D_06_R, name="treatments_def_stress_vs_ctrl")
+res_dds_D_06_S <- results(dds_D_06_S, name="treatments_def_stress_vs_ctrl")
+res_dds_D_24_R <- results(dds_D_24_R, name="treatments_24R_stress_vs_ctrl")
+res_dds_D_24_S <- results(dds_D_24_S, name="treatments_def_stress_vs_ctrl")
+res_dds_D_48_R <- results(dds_D_48_R, name="treatments_def_stress_vs_ctrl")
+res_dds_D_48_S <- results(dds_D_48_S, name="treatments_def_stress_vs_ctrl")
+res_dds_D_72_R <- results(dds_D_72_R, name="treatments_def_stress_vs_ctrl")
+res_dds_D_72_S <- results(dds_D_72_S, name="treatments_def_stress_vs_ctrl")
+
+res_dds_H_06_R <- results(dds_H_06_R, name="treatments_def_stress_vs_ctrl")
+res_dds_H_06_S <- results(dds_H_06_S, name="treatments_def_stress_vs_ctrl")
+res_dds_H_24_R <- results(dds_H_24_R, name="treatments_24R_stress_vs_ctrl")
+res_dds_H_24_S <- results(dds_H_24_S, name="treatments_def_stress_vs_ctrl")
+res_dds_H_48_R <- results(dds_H_48_R, name="treatments_def_stress_vs_ctrl")
+res_dds_H_48_S <- results(dds_H_48_S, name="treatments_def_stress_vs_ctrl")
+res_dds_H_72_R <- results(dds_H_72_R, name="treatments_H72R_stress_vs_ctrl")
+res_dds_H_72_S <- results(dds_H_72_S, name="treatments_def_stress_vs_ctrl")
+
+res_dds_S_06_R <- results(dds_S_06_R, name="treatments_def_stress_vs_ctrl")
+res_dds_S_06_S <- results(dds_S_06_S, name="treatments_def_stress_vs_ctrl")
+res_dds_S_24_R <- results(dds_S_24_R, name="treatments_24R_stress_vs_ctrl")
+res_dds_S_24_S <- results(dds_S_24_S, name="treatments_def_stress_vs_ctrl")
+res_dds_S_48_R <- results(dds_S_48_R, name="treatments_def_stress_vs_ctrl")
+res_dds_S_48_S <- results(dds_S_48_S, name="treatments_def_stress_vs_ctrl")
+res_dds_S_72_R <- results(dds_S_72_R, name="treatments_def_stress_vs_ctrl")
+res_dds_S_72_S <- results(dds_S_72_S, name="treatments_def_stress_vs_ctrl")
+
+res.shr_dds_D_06_R <- lfcShrink(dds_D_06_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_06_S <- lfcShrink(dds_D_06_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_24_R <- lfcShrink(dds_D_24_R, coef="treatments_24R_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_24_S <- lfcShrink(dds_D_24_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_48_R <- lfcShrink(dds_D_48_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_48_S <- lfcShrink(dds_D_48_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_72_R <- lfcShrink(dds_D_72_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_D_72_S <- lfcShrink(dds_D_72_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+
+res.shr_dds_H_06_R <- lfcShrink(dds_H_06_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_06_S <- lfcShrink(dds_H_06_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_24_R <- lfcShrink(dds_H_24_R, coef="treatments_24R_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_24_S <- lfcShrink(dds_H_24_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_48_R <- lfcShrink(dds_H_48_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_48_S <- lfcShrink(dds_H_48_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_72_R <- lfcShrink(dds_H_72_R, coef="treatments_H72R_stress_vs_ctrl", type="apeglm")
+res.shr_dds_H_72_S <- lfcShrink(dds_H_72_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+
+res.shr_dds_S_06_R <- lfcShrink(dds_S_06_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_06_S <- lfcShrink(dds_S_06_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_24_R <- lfcShrink(dds_S_24_R, coef="treatments_24R_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_24_S <- lfcShrink(dds_S_24_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_48_R <- lfcShrink(dds_S_48_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_48_S <- lfcShrink(dds_S_48_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_72_R <- lfcShrink(dds_S_72_R, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+res.shr_dds_S_72_S <- lfcShrink(dds_S_72_S, coef="treatments_def_stress_vs_ctrl", type="apeglm")
+```
+
+```{r MA plot}
+plotMA(res.shr_dds_D_06_R, ylim=c(-5,5), alpha = 0.05, main = "D_06_R with shrinking") #with shrinking
+plotMA(res_dds_D_06_R, ylim=c(-5,5), alpha = 0.05, main = "D_06_R without shrinking") #without shrinking
+plotMA(res.shr_dds_D_06_S, ylim=c(-5,5), alpha = 0.05, main = "D_06_S with shrinking") #with shrinking
+plotMA(res_dds_D_06_S, ylim=c(-5,5), alpha = 0.05, main = "D_06_S without shrinking") #without shrinking
+plotMA(res.shr_dds_D_24_R, ylim=c(-5,5), alpha = 0.05, main = "D_24_R with shrinking") #with shrinking
+plotMA(res_dds_D_24_R, ylim=c(-5,5), alpha = 0.05, main = "D_24_R without shrinking") #without shrinking
+plotMA(res.shr_dds_D_24_S, ylim=c(-5,5), alpha = 0.05, main = "D_24_S with shrinking") #with shrinking
+plotMA(res_dds_D_24_S, ylim=c(-5,5), alpha = 0.05, main = "D_24_S without shrinking") #without shrinking
+plotMA(res.shr_dds_D_48_R, ylim=c(-5,5), alpha = 0.05, main = "D_48_R with shrinking") #with shrinking
+plotMA(res_dds_D_48_R, ylim=c(-5,5), alpha = 0.05, main = "D_48_R without shrinking") #without shrinking
+plotMA(res.shr_dds_D_48_S, ylim=c(-5,5), alpha = 0.05, main = "D_48_S with shrinking") #with shrinking
+plotMA(res_dds_D_48_S, ylim=c(-5,5), alpha = 0.05, main = "D_48_S without shrinking") #without shrinking
+plotMA(res.shr_dds_D_72_R, ylim=c(-5,5), alpha = 0.05, main = "D_72_R with shrinking") #with shrinking
+plotMA(res_dds_D_72_R, ylim=c(-5,5), alpha = 0.05, main = "D_72_R without shrinking") #without shrinking
+plotMA(res.shr_dds_D_72_S, ylim=c(-5,5), alpha = 0.05, main = "D_72_S with shrinking") #with shrinking
+plotMA(res_dds_D_72_S, ylim=c(-5,5), alpha = 0.05, main = "D_72_S without shrinking") #without shrinking
+
+plotMA(res.shr_dds_H_06_R, ylim=c(-5,5), alpha = 0.05, main = "H_06_R with shrinking") #with shrinking
+plotMA(res_dds_H_06_R, ylim=c(-5,5), alpha = 0.05, main = "H_06_R without shrinking") #without shrinking
+plotMA(res.shr_dds_H_06_S, ylim=c(-5,5), alpha = 0.05, main = "H_06_S with shrinking") #with shrinking
+plotMA(res_dds_H_06_S, ylim=c(-5,5), alpha = 0.05, main = "H_06_S without shrinking") #without shrinking
+plotMA(res.shr_dds_H_24_R, ylim=c(-5,5), alpha = 0.05, main = "H_24_R with shrinking") #with shrinking
+plotMA(res_dds_H_24_R, ylim=c(-5,5), alpha = 0.05, main = "H_24_R without shrinking") #without shrinking
+plotMA(res.shr_dds_H_24_S, ylim=c(-5,5), alpha = 0.05, main = "H_24_S with shrinking") #with shrinking
+plotMA(res_dds_H_24_S, ylim=c(-5,5), alpha = 0.05, main = "H_24_S without shrinking") #without shrinking
+plotMA(res.shr_dds_H_48_R, ylim=c(-5,5), alpha = 0.05, main = "H_48_R with shrinking") #with shrinking
+plotMA(res_dds_H_48_R, ylim=c(-5,5), alpha = 0.05, main = "H_48_R without shrinking") #without shrinking
+plotMA(res.shr_dds_H_48_S, ylim=c(-5,5), alpha = 0.05, main = "H_48_S with shrinking") #with shrinking
+plotMA(res_dds_H_48_S, ylim=c(-5,5), alpha = 0.05, main = "H_48_S without shrinking") #without shrinking
+plotMA(res.shr_dds_H_72_R, ylim=c(-5,5), alpha = 0.05, main = "H_72_R with shrinking") #with shrinking
+plotMA(res_dds_H_72_R, ylim=c(-5,5), alpha = 0.05, main = "H_72_R without shrinking") #without shrinking
+plotMA(res.shr_dds_H_72_S, ylim=c(-5,5), alpha = 0.05, main = "H_72_S with shrinking") #with shrinking
+plotMA(res_dds_H_72_S, ylim=c(-5,5), alpha = 0.05, main = "H_72_S without shrinking") #without shrinking
+
+plotMA(res.shr_dds_S_06_R, ylim=c(-5,5), alpha = 0.05, main = "S_06_R with shrinking") #with shrinking
+plotMA(res_dds_S_06_R, ylim=c(-5,5), alpha = 0.05, main = "S_06_R without shrinking") #without shrinking
+plotMA(res.shr_dds_S_06_S, ylim=c(-5,5), alpha = 0.05, main = "S_06_S with shrinking") #with shrinking
+plotMA(res_dds_S_06_S, ylim=c(-5,5), alpha = 0.05, main = "S_06_S without shrinking") #without shrinking
+plotMA(res.shr_dds_S_24_R, ylim=c(-5,5), alpha = 0.05, main = "S_24_R with shrinking") #with shrinking
+plotMA(res_dds_S_24_R, ylim=c(-5,5), alpha = 0.05, main = "S_24_R without shrinking") #without shrinking
+plotMA(res.shr_dds_S_24_S, ylim=c(-5,5), alpha = 0.05, main = "S_24_S with shrinking") #with shrinking
+plotMA(res_dds_S_24_S, ylim=c(-5,5), alpha = 0.05, main = "S_24_S without shrinking") #without shrinking
+plotMA(res.shr_dds_S_48_R, ylim=c(-5,5), alpha = 0.05, main = "S_48_R with shrinking") #with shrinking
+plotMA(res_dds_S_48_R, ylim=c(-5,5), alpha = 0.05, main = "S_48_R without shrinking") #without shrinking
+plotMA(res.shr_dds_S_48_S, ylim=c(-5,5), alpha = 0.05, main = "S_48_S with shrinking") #with shrinking
+plotMA(res_dds_S_48_S, ylim=c(-5,5), alpha = 0.05, main = "S_48_S without shrinking") #without shrinking
+plotMA(res.shr_dds_S_72_R, ylim=c(-5,5), alpha = 0.05, main = "S_72_R with shrinking") #with shrinking
+plotMA(res_dds_S_72_R, ylim=c(-5,5), alpha = 0.05, main = "S_72_R without shrinking") #without shrinking
+plotMA(res.shr_dds_S_72_S, ylim=c(-5,5), alpha = 0.05, main = "S_72_S with shrinking") #with shrinking
+plotMA(res_dds_S_72_S, ylim=c(-5,5), alpha = 0.05, main = "S_72_S without shrinking") #without shrinking
+```
+
+
+```{r volavano plot with labels}
+library(EnhancedVolcano)
+
+vol_D_06_R_wL <- EnhancedVolcano(res.shr_dds_D_06_R, lab = rownames(res.shr_dds_D_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_06_R_nL <- EnhancedVolcano(res.shr_dds_D_06_R, lab = rownames(res.shr_dds_D_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_06_S_wL <- EnhancedVolcano(res.shr_dds_D_06_S, lab = rownames(res.shr_dds_D_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_06_S_nL <- EnhancedVolcano(res.shr_dds_D_06_S, lab = rownames(res.shr_dds_D_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_24_R_wL <- EnhancedVolcano(res.shr_dds_D_24_R, lab = rownames(res.shr_dds_D_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_24_R_nL <- EnhancedVolcano(res.shr_dds_D_24_R, lab = rownames(res.shr_dds_D_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_24_S_wL <- EnhancedVolcano(res.shr_dds_D_24_S, lab = rownames(res.shr_dds_D_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_24_S_nL <- EnhancedVolcano(res.shr_dds_D_24_S, lab = rownames(res.shr_dds_D_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_48_R_wL <- EnhancedVolcano(res.shr_dds_D_48_R, lab = rownames(res.shr_dds_D_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_48_R_nL <- EnhancedVolcano(res.shr_dds_D_48_R, lab = rownames(res.shr_dds_D_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_48_S_wL <- EnhancedVolcano(res.shr_dds_D_48_S, lab = rownames(res.shr_dds_D_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_48_S_nL <- EnhancedVolcano(res.shr_dds_D_48_S, lab = rownames(res.shr_dds_D_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_72_R_wL <- EnhancedVolcano(res.shr_dds_D_72_R, lab = rownames(res.shr_dds_D_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_72_R_nL <- EnhancedVolcano(res.shr_dds_D_72_R, lab = rownames(res.shr_dds_D_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_D_72_S_wL <- EnhancedVolcano(res.shr_dds_D_72_S, lab = rownames(res.shr_dds_D_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_D_72_S_nL <- EnhancedVolcano(res.shr_dds_D_72_S, lab = rownames(res.shr_dds_D_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+
+vol_H_06_R_wL <- EnhancedVolcano(res.shr_dds_H_06_R, lab = rownames(res.shr_dds_H_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_06_R_nL <- EnhancedVolcano(res.shr_dds_H_06_R, lab = rownames(res.shr_dds_H_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_06_S_wL <- EnhancedVolcano(res.shr_dds_H_06_S, lab = rownames(res.shr_dds_H_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_06_S_nL <- EnhancedVolcano(res.shr_dds_H_06_S, lab = rownames(res.shr_dds_H_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_24_R_wL <- EnhancedVolcano(res.shr_dds_H_24_R, lab = rownames(res.shr_dds_H_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_24_R_nL <- EnhancedVolcano(res.shr_dds_H_24_R, lab = rownames(res.shr_dds_H_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_24_S_wL <- EnhancedVolcano(res.shr_dds_H_24_S, lab = rownames(res.shr_dds_H_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_24_S_nL <- EnhancedVolcano(res.shr_dds_H_24_S, lab = rownames(res.shr_dds_H_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_48_R_wL <- EnhancedVolcano(res.shr_dds_H_48_R, lab = rownames(res.shr_dds_H_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_48_R_nL <- EnhancedVolcano(res.shr_dds_H_48_R, lab = rownames(res.shr_dds_H_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_48_S_wL <- EnhancedVolcano(res.shr_dds_H_48_S, lab = rownames(res.shr_dds_H_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_48_S_nL <- EnhancedVolcano(res.shr_dds_H_48_S, lab = rownames(res.shr_dds_H_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_72_R_wL <- EnhancedVolcano(res.shr_dds_H_72_R, lab = rownames(res.shr_dds_H_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_72_R_nL <- EnhancedVolcano(res.shr_dds_H_72_R, lab = rownames(res.shr_dds_H_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_H_72_S_wL <- EnhancedVolcano(res.shr_dds_H_72_S, lab = rownames(res.shr_dds_H_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_H_72_S_nL <- EnhancedVolcano(res.shr_dds_H_72_S, lab = rownames(res.shr_dds_H_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+
+vol_S_06_R_wL <- EnhancedVolcano(res.shr_dds_S_06_R, lab = rownames(res.shr_dds_S_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_06_R_nL <- EnhancedVolcano(res.shr_dds_S_06_R, lab = rownames(res.shr_dds_S_06_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_06_S_wL <- EnhancedVolcano(res.shr_dds_S_06_S, lab = rownames(res.shr_dds_S_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_06_S_nL <- EnhancedVolcano(res.shr_dds_S_06_S, lab = rownames(res.shr_dds_S_06_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_24_R_wL <- EnhancedVolcano(res.shr_dds_S_24_R, lab = rownames(res.shr_dds_S_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_24_R_nL <- EnhancedVolcano(res.shr_dds_S_24_R, lab = rownames(res.shr_dds_S_24_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_24_S_wL <- EnhancedVolcano(res.shr_dds_S_24_S, lab = rownames(res.shr_dds_S_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_24_S_nL <- EnhancedVolcano(res.shr_dds_S_24_S, lab = rownames(res.shr_dds_S_24_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_48_R_wL <- EnhancedVolcano(res.shr_dds_S_48_R, lab = rownames(res.shr_dds_S_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_48_R_nL <- EnhancedVolcano(res.shr_dds_S_48_R, lab = rownames(res.shr_dds_S_48_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_48_S_wL <- EnhancedVolcano(res.shr_dds_S_48_S, lab = rownames(res.shr_dds_S_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_48_S_nL <- EnhancedVolcano(res.shr_dds_S_48_S, lab = rownames(res.shr_dds_S_48_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_72_R_wL <- EnhancedVolcano(res.shr_dds_S_72_R, lab = rownames(res.shr_dds_S_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_72_R_nL <- EnhancedVolcano(res.shr_dds_S_72_R, lab = rownames(res.shr_dds_S_72_R), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+vol_S_72_S_wL <- EnhancedVolcano(res.shr_dds_S_72_S, lab = rownames(res.shr_dds_S_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10)) # with labels
+vol_S_72_S_nL <- EnhancedVolcano(res.shr_dds_S_72_S, lab = rownames(res.shr_dds_S_72_S), x = 'log2FoldChange', y = 'padj', pCutoff = 0.05, FCcutoff = 1, ylim = c(0,100), xlim = c(-10,10), labSize = 0) # without labels
+
+vol_D_06_R_wL
+vol_D_06_R_nL
+vol_D_06_S_wL
+vol_D_06_S_nL
+vol_D_24_R_wL
+vol_D_24_R_nL
+vol_D_24_S_wL
+vol_D_24_S_nL
+vol_D_48_R_wL
+vol_D_48_R_nL
+vol_D_48_S_wL
+vol_D_48_S_nL
+vol_D_72_R_wL
+vol_D_72_R_nL
+vol_D_72_S_wL
+vol_D_72_S_nL
+
+vol_H_06_R_wL
+vol_H_06_R_nL
+vol_H_06_S_wL
+vol_H_06_S_nL
+vol_H_24_R_wL
+vol_H_24_R_nL
+vol_H_24_S_wL
+vol_H_24_S_nL
+vol_H_48_R_wL
+vol_H_48_R_nL
+vol_H_48_S_wL
+vol_H_48_S_nL
+vol_H_72_R_wL
+vol_H_72_R_nL
+vol_H_72_S_wL
+vol_H_72_S_nL
+
+vol_S_06_R_wL
+vol_S_06_R_nL
+vol_S_06_S_wL
+vol_S_06_S_nL
+vol_S_24_R_wL
+vol_S_24_R_nL
+vol_S_24_S_wL
+vol_S_24_S_nL
+vol_S_48_R_wL
+vol_S_48_R_nL
+vol_S_48_S_wL
+vol_S_48_S_nL
+vol_S_72_R_wL
+vol_S_72_R_nL
+vol_S_72_S_wL
+vol_S_72_S_nL
+
+## export ## drought
+pdf(file = "Volacano plot_D_06_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_06_R_wL
+dev.off()
+pdf(file = "Volacano plot_D_06_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_06_R_nL
+dev.off()
+pdf(file = "Volacano plot_D_06_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_06_S_wL
+dev.off()
+pdf(file = "Volacano plot_D_06_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_06_S_nL
+dev.off()
+pdf(file = "Volacano plot_D_24_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_24_R_wL
+dev.off()
+pdf(file = "Volacano plot_D_24_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_24_R_nL
+dev.off()
+pdf(file = "Volacano plot_D_24_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_24_S_wL
+dev.off()
+pdf(file = "Volacano plot_D_24_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_24_S_nL
+dev.off()
+pdf(file = "Volacano plot_D_48_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_48_R_wL
+dev.off()
+pdf(file = "Volacano plot_D_48_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_48_R_nL
+dev.off()
+pdf(file = "Volacano plot_D_48_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_48_S_wL
+dev.off()
+pdf(file = "Volacano plot_D_48_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_48_S_nL
+dev.off()
+pdf(file = "Volacano plot_D_72_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_72_R_wL
+dev.off()
+pdf(file = "Volacano plot_D_72_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_72_R_nL
+dev.off()
+pdf(file = "Volacano plot_D_72_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_72_S_wL
+dev.off()
+pdf(file = "Volacano plot_D_72_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_D_72_S_nL
+dev.off()
+
+
+## export ## heat
+pdf(file = "Volacano plot_H_06_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_06_R_wL
+dev.off()
+pdf(file = "Volacano plot_H_06_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_06_R_nL
+dev.off()
+pdf(file = "Volacano plot_H_06_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_06_S_wL
+dev.off()
+pdf(file = "Volacano plot_H_06_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_06_S_nL
+dev.off()
+pdf(file = "Volacano plot_H_24_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_24_R_wL
+dev.off()
+pdf(file = "Volacano plot_H_24_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_24_R_nL
+dev.off()
+pdf(file = "Volacano plot_H_24_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_24_S_wL
+dev.off()
+pdf(file = "Volacano plot_H_24_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_24_S_nL
+dev.off()
+pdf(file = "Volacano plot_H_48_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_48_R_wL
+dev.off()
+pdf(file = "Volacano plot_H_48_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_48_R_nL
+dev.off()
+pdf(file = "Volacano plot_H_48_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_48_S_wL
+dev.off()
+pdf(file = "Volacano plot_H_48_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_48_S_nL
+dev.off()
+pdf(file = "Volacano plot_H_72_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_72_R_wL
+dev.off()
+pdf(file = "Volacano plot_H_72_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_72_R_nL
+dev.off()
+pdf(file = "Volacano plot_H_72_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_72_S_wL
+dev.off()
+pdf(file = "Volacano plot_H_72_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_H_72_S_nL
+dev.off()
+
+## export ## salinity
+pdf(file = "Volacano plot_S_06_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_06_R_wL
+dev.off()
+pdf(file = "Volacano plot_S_06_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_06_R_nL
+dev.off()
+pdf(file = "Volacano plot_S_06_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_06_S_wL
+dev.off()
+pdf(file = "Volacano plot_S_06_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_06_S_nL
+dev.off()
+pdf(file = "Volacano plot_S_24_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_24_R_wL
+dev.off()
+pdf(file = "Volacano plot_S_24_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_24_R_nL
+dev.off()
+pdf(file = "Volacano plot_S_24_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_24_S_wL
+dev.off()
+pdf(file = "Volacano plot_S_24_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_24_S_nL
+dev.off()
+pdf(file = "Volacano plot_S_48_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_48_R_wL
+dev.off()
+pdf(file = "Volacano plot_S_48_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_48_R_nL
+dev.off()
+pdf(file = "Volacano plot_S_48_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_48_S_wL
+dev.off()
+pdf(file = "Volacano plot_S_48_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_48_S_nL
+dev.off()
+pdf(file = "Volacano plot_S_72_R with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_72_R_wL
+dev.off()
+pdf(file = "Volacano plot_S_72_R without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_72_R_nL
+dev.off()
+pdf(file = "Volacano plot_S_72_S with labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_72_S_wL
+dev.off()
+pdf(file = "Volacano plot_S_72_S without labels.pdf", width = 7, height = 7) # defaults to 7 x 7 inches
+vol_S_72_S_nL
+dev.off()
+```
+
+
+```{r export results}
+res.shr_dds_D_06_R <- res.shr_dds_D_06_R[!(is.na(res.shr_dds_D_06_R$padj)),] 
+res.shr_dds_D_06_S <- res.shr_dds_D_06_S[!(is.na(res.shr_dds_D_06_S$padj)),] 
+res.shr_dds_D_24_R <- res.shr_dds_D_24_R[!(is.na(res.shr_dds_D_24_R$padj)),] 
+res.shr_dds_D_24_S <- res.shr_dds_D_24_S[!(is.na(res.shr_dds_D_24_S$padj)),] 
+res.shr_dds_D_48_R <- res.shr_dds_D_48_R[!(is.na(res.shr_dds_D_48_R$padj)),] 
+res.shr_dds_D_48_S <- res.shr_dds_D_48_S[!(is.na(res.shr_dds_D_48_S$padj)),] 
+res.shr_dds_D_72_R <- res.shr_dds_D_72_R[!(is.na(res.shr_dds_D_72_R$padj)),] 
+res.shr_dds_D_72_S <- res.shr_dds_D_72_S[!(is.na(res.shr_dds_D_72_S$padj)),] 
+
+res.shr_dds_H_06_R <- res.shr_dds_H_06_R[!(is.na(res.shr_dds_H_06_R$padj)),] 
+res.shr_dds_H_06_S <- res.shr_dds_H_06_S[!(is.na(res.shr_dds_H_06_S$padj)),] 
+res.shr_dds_H_24_R <- res.shr_dds_H_24_R[!(is.na(res.shr_dds_H_24_R$padj)),] 
+res.shr_dds_H_24_S <- res.shr_dds_H_24_S[!(is.na(res.shr_dds_H_24_S$padj)),] 
+res.shr_dds_H_48_R <- res.shr_dds_H_48_R[!(is.na(res.shr_dds_H_48_R$padj)),] 
+res.shr_dds_H_48_S <- res.shr_dds_H_48_S[!(is.na(res.shr_dds_H_48_S$padj)),] 
+res.shr_dds_H_72_R <- res.shr_dds_H_72_R[!(is.na(res.shr_dds_H_72_R$padj)),] 
+res.shr_dds_H_72_S <- res.shr_dds_H_72_S[!(is.na(res.shr_dds_H_72_S$padj)),] 
+
+res.shr_dds_S_06_R <- res.shr_dds_S_06_R[!(is.na(res.shr_dds_S_06_R$padj)),] 
+res.shr_dds_S_06_S <- res.shr_dds_S_06_S[!(is.na(res.shr_dds_S_06_S$padj)),] 
+res.shr_dds_S_24_R <- res.shr_dds_S_24_R[!(is.na(res.shr_dds_S_24_R$padj)),] 
+res.shr_dds_S_24_S <- res.shr_dds_S_24_S[!(is.na(res.shr_dds_S_24_S$padj)),] 
+res.shr_dds_S_48_R <- res.shr_dds_S_48_R[!(is.na(res.shr_dds_S_48_R$padj)),] 
+res.shr_dds_S_48_S <- res.shr_dds_S_48_S[!(is.na(res.shr_dds_S_48_S$padj)),] 
+res.shr_dds_S_72_R <- res.shr_dds_S_72_R[!(is.na(res.shr_dds_S_72_R$padj)),] 
+res.shr_dds_S_72_S <- res.shr_dds_S_72_S[!(is.na(res.shr_dds_S_72_S$padj)),] 
+
+# List of genes that were differentially expressed
+deseq2_gene_list_D_06_R <- as.data.frame(res.shr_dds_D_06_R[res.shr_dds_D_06_R$padj < 0.05,])
+deseq2_gene_list_D_06_S <- as.data.frame(res.shr_dds_D_06_S[res.shr_dds_D_06_S$padj < 0.05,])
+deseq2_gene_list_D_24_R <- as.data.frame(res.shr_dds_D_24_R[res.shr_dds_D_24_R$padj < 0.05,])
+deseq2_gene_list_D_24_S <- as.data.frame(res.shr_dds_D_24_S[res.shr_dds_D_24_S$padj < 0.05,])
+deseq2_gene_list_D_48_R <- as.data.frame(res.shr_dds_D_48_R[res.shr_dds_D_48_R$padj < 0.05,])
+deseq2_gene_list_D_48_S <- as.data.frame(res.shr_dds_D_48_S[res.shr_dds_D_48_S$padj < 0.05,])
+deseq2_gene_list_D_72_R <- as.data.frame(res.shr_dds_D_72_R[res.shr_dds_D_72_R$padj < 0.05,])
+deseq2_gene_list_D_72_S <- as.data.frame(res.shr_dds_D_72_S[res.shr_dds_D_72_S$padj < 0.05,])
+
+deseq2_gene_list_H_06_R <- as.data.frame(res.shr_dds_H_06_R[res.shr_dds_H_06_R$padj < 0.05,])
+deseq2_gene_list_H_06_S <- as.data.frame(res.shr_dds_H_06_S[res.shr_dds_H_06_S$padj < 0.05,])
+deseq2_gene_list_H_24_R <- as.data.frame(res.shr_dds_H_24_R[res.shr_dds_H_24_R$padj < 0.05,])
+deseq2_gene_list_H_24_S <- as.data.frame(res.shr_dds_H_24_S[res.shr_dds_H_24_S$padj < 0.05,])
+deseq2_gene_list_H_48_R <- as.data.frame(res.shr_dds_H_48_R[res.shr_dds_H_48_R$padj < 0.05,])
+deseq2_gene_list_H_48_S <- as.data.frame(res.shr_dds_H_48_S[res.shr_dds_H_48_S$padj < 0.05,])
+deseq2_gene_list_H_72_R <- as.data.frame(res.shr_dds_H_72_R[res.shr_dds_H_72_R$padj < 0.05,])
+deseq2_gene_list_H_72_S <- as.data.frame(res.shr_dds_H_72_S[res.shr_dds_H_72_S$padj < 0.05,])
+
+deseq2_gene_list_S_06_R <- as.data.frame(res.shr_dds_S_06_R[res.shr_dds_S_06_R$padj < 0.05,])
+deseq2_gene_list_S_06_S <- as.data.frame(res.shr_dds_S_06_S[res.shr_dds_S_06_S$padj < 0.05,])
+deseq2_gene_list_S_24_R <- as.data.frame(res.shr_dds_S_24_R[res.shr_dds_S_24_R$padj < 0.05,])
+deseq2_gene_list_S_24_S <- as.data.frame(res.shr_dds_S_24_S[res.shr_dds_S_24_S$padj < 0.05,])
+deseq2_gene_list_S_48_R <- as.data.frame(res.shr_dds_S_48_R[res.shr_dds_S_48_R$padj < 0.05,])
+deseq2_gene_list_S_48_S <- as.data.frame(res.shr_dds_S_48_S[res.shr_dds_S_48_S$padj < 0.05,])
+deseq2_gene_list_S_72_R <- as.data.frame(res.shr_dds_S_72_R[res.shr_dds_S_72_R$padj < 0.05,])
+deseq2_gene_list_S_72_S <- as.data.frame(res.shr_dds_S_72_S[res.shr_dds_S_72_S$padj < 0.05,])
+
+# export data
+write.table(deseq2_gene_list_D_06_R, "deseq2_gene_list_count100_shrink_0.05_padj_D_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_06_S, "deseq2_gene_list_count100_shrink_0.05_padj_D_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_24_R, "deseq2_gene_list_count100_shrink_0.05_padj_D_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_24_S, "deseq2_gene_list_count100_shrink_0.05_padj_D_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_48_R, "deseq2_gene_list_count100_shrink_0.05_padj_D_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_48_S, "deseq2_gene_list_count100_shrink_0.05_padj_D_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_72_R, "deseq2_gene_list_count100_shrink_0.05_padj_D_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_72_S, "deseq2_gene_list_count100_shrink_0.05_padj_D_72_S.txt", sep="\t")
+
+write.table(deseq2_gene_list_H_06_R, "deseq2_gene_list_count100_shrink_0.05_padj_H_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_06_S, "deseq2_gene_list_count100_shrink_0.05_padj_H_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_24_R, "deseq2_gene_list_count100_shrink_0.05_padj_H_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_24_S, "deseq2_gene_list_count100_shrink_0.05_padj_H_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_48_R, "deseq2_gene_list_count100_shrink_0.05_padj_H_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_48_S, "deseq2_gene_list_count100_shrink_0.05_padj_H_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_72_R, "deseq2_gene_list_count100_shrink_0.05_padj_H_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_72_S, "deseq2_gene_list_count100_shrink_0.05_padj_H_72_S.txt", sep="\t")
+
+write.table(deseq2_gene_list_S_06_R, "deseq2_gene_list_count100_shrink_0.05_padj_S_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_06_S, "deseq2_gene_list_count100_shrink_0.05_padj_S_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_24_R, "deseq2_gene_list_count100_shrink_0.05_padj_S_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_24_S, "deseq2_gene_list_count100_shrink_0.05_padj_S_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_48_R, "deseq2_gene_list_count100_shrink_0.05_padj_S_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_48_S, "deseq2_gene_list_count100_shrink_0.05_padj_S_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_72_R, "deseq2_gene_list_count100_shrink_0.05_padj_S_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_72_S, "deseq2_gene_list_count100_shrink_0.05_padj_S_72_S.txt", sep="\t")
+```
+
+
+# results without the shrinking function (NOT SELECTED)
+```{r export results}
+# Removed rows with "NA" in P- value, which DESeq inputs when it detects extreme outliers in samples u sing Cook's distance calculation. These may have a significant effect on the model, or, perhaps the model we used (~treatments) does not account for some property of the data...
+res_dds_D_06_R <- res_dds_D_06_R[!(is.na(res_dds_D_06_R$padj)),] 
+res_dds_D_06_S <- res_dds_D_06_S[!(is.na(res_dds_D_06_S$padj)),] 
+res_dds_D_24_R <- res_dds_D_24_R[!(is.na(res_dds_D_24_R$padj)),] 
+res_dds_D_24_S <- res_dds_D_24_S[!(is.na(res_dds_D_24_S$padj)),] 
+res_dds_D_48_R <- res_dds_D_48_R[!(is.na(res_dds_D_48_R$padj)),] 
+res_dds_D_48_S <- res_dds_D_48_S[!(is.na(res_dds_D_48_S$padj)),] 
+res_dds_D_72_R <- res_dds_D_72_R[!(is.na(res_dds_D_72_R$padj)),] 
+res_dds_D_72_S <- res_dds_D_72_S[!(is.na(res_dds_D_72_S$padj)),] 
+
+res_dds_H_06_R <- res_dds_H_06_R[!(is.na(res_dds_H_06_R$padj)),] 
+res_dds_H_06_S <- res_dds_H_06_S[!(is.na(res_dds_H_06_S$padj)),] 
+res_dds_H_24_R <- res_dds_H_24_R[!(is.na(res_dds_H_24_R$padj)),] 
+res_dds_H_24_S <- res_dds_H_24_S[!(is.na(res_dds_H_24_S$padj)),] 
+res_dds_H_48_R <- res_dds_H_48_R[!(is.na(res_dds_H_48_R$padj)),] 
+res_dds_H_48_S <- res_dds_H_48_S[!(is.na(res_dds_H_48_S$padj)),] 
+res_dds_H_72_R <- res_dds_H_72_R[!(is.na(res_dds_H_72_R$padj)),] 
+res_dds_H_72_S <- res_dds_H_72_S[!(is.na(res_dds_H_72_S$padj)),] 
+
+res_dds_S_06_R <- res_dds_S_06_R[!(is.na(res_dds_S_06_R$padj)),] 
+res_dds_S_06_S <- res_dds_S_06_S[!(is.na(res_dds_S_06_S$padj)),] 
+res_dds_S_24_R <- res_dds_S_24_R[!(is.na(res_dds_S_24_R$padj)),] 
+res_dds_S_24_S <- res_dds_S_24_S[!(is.na(res_dds_S_24_S$padj)),] 
+res_dds_S_48_R <- res_dds_S_48_R[!(is.na(res_dds_S_48_R$padj)),] 
+res_dds_S_48_S <- res_dds_S_48_S[!(is.na(res_dds_S_48_S$padj)),] 
+res_dds_S_72_R <- res_dds_S_72_R[!(is.na(res_dds_S_72_R$padj)),] 
+res_dds_S_72_S <- res_dds_S_72_S[!(is.na(res_dds_S_72_S$padj)),] 
+
+# List of genes that were differentially expressed
+deseq2_gene_list_D_06_R_nosh <- as.data.frame(res_dds_D_06_R[res_dds_D_06_R$padj < 0.05,])
+deseq2_gene_list_D_06_S_nosh <- as.data.frame(res_dds_D_06_S[res_dds_D_06_S$padj < 0.05,])
+deseq2_gene_list_D_24_R_nosh <- as.data.frame(res_dds_D_24_R[res_dds_D_24_R$padj < 0.05,])
+deseq2_gene_list_D_24_S_nosh <- as.data.frame(res_dds_D_24_S[res_dds_D_24_S$padj < 0.05,])
+deseq2_gene_list_D_48_R_nosh <- as.data.frame(res_dds_D_48_R[res_dds_D_48_R$padj < 0.05,])
+deseq2_gene_list_D_48_S_nosh <- as.data.frame(res_dds_D_48_S[res_dds_D_48_S$padj < 0.05,])
+deseq2_gene_list_D_72_R_nosh <- as.data.frame(res_dds_D_72_R[res_dds_D_72_R$padj < 0.05,])
+deseq2_gene_list_D_72_S_nosh <- as.data.frame(res_dds_D_72_S[res_dds_D_72_S$padj < 0.05,])
+
+deseq2_gene_list_H_06_R_nosh <- as.data.frame(res_dds_H_06_R[res_dds_H_06_R$padj < 0.05,])
+deseq2_gene_list_H_06_S_nosh <- as.data.frame(res_dds_H_06_S[res_dds_H_06_S$padj < 0.05,])
+deseq2_gene_list_H_24_R_nosh <- as.data.frame(res_dds_H_24_R[res_dds_H_24_R$padj < 0.05,])
+deseq2_gene_list_H_24_S_nosh <- as.data.frame(res_dds_H_24_S[res_dds_H_24_S$padj < 0.05,])
+deseq2_gene_list_H_48_R_nosh <- as.data.frame(res_dds_H_48_R[res_dds_H_48_R$padj < 0.05,])
+deseq2_gene_list_H_48_S_nosh <- as.data.frame(res_dds_H_48_S[res_dds_H_48_S$padj < 0.05,])
+deseq2_gene_list_H_72_R_nosh <- as.data.frame(res_dds_H_72_R[res_dds_H_72_R$padj < 0.05,])
+deseq2_gene_list_H_72_S_nosh <- as.data.frame(res_dds_H_72_S[res_dds_H_72_S$padj < 0.05,])
+
+deseq2_gene_list_S_06_R_nosh <- as.data.frame(res_dds_S_06_R[res_dds_S_06_R$padj < 0.05,])
+deseq2_gene_list_S_06_S_nosh <- as.data.frame(res_dds_S_06_S[res_dds_S_06_S$padj < 0.05,])
+deseq2_gene_list_S_24_R_nosh <- as.data.frame(res_dds_S_24_R[res_dds_S_24_R$padj < 0.05,])
+deseq2_gene_list_S_24_S_nosh <- as.data.frame(res_dds_S_24_S[res_dds_S_24_S$padj < 0.05,])
+deseq2_gene_list_S_48_R_nosh <- as.data.frame(res_dds_S_48_R[res_dds_S_48_R$padj < 0.05,])
+deseq2_gene_list_S_48_S_nosh <- as.data.frame(res_dds_S_48_S[res_dds_S_48_S$padj < 0.05,])
+deseq2_gene_list_S_72_R_nosh <- as.data.frame(res_dds_S_72_R[res_dds_S_72_R$padj < 0.05,])
+deseq2_gene_list_S_72_S_nosh <- as.data.frame(res_dds_S_72_S[res_dds_S_72_S$padj < 0.05,])
+
+# export data
+write.table(deseq2_gene_list_D_06_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_06_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_24_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_24_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_48_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_48_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_D_72_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_D_72_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_D_72_S.txt", sep="\t")
+
+write.table(deseq2_gene_list_H_06_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_06_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_24_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_24_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_48_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_48_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_H_72_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_H_72_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_H_72_S.txt", sep="\t")
+
+write.table(deseq2_gene_list_S_06_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_06_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_06_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_06_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_24_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_24_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_24_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_24_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_48_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_48_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_48_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_48_S.txt", sep="\t")
+write.table(deseq2_gene_list_S_72_R_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_72_R.txt", sep="\t")
+write.table(deseq2_gene_list_S_72_S_nosh, "deseq2_gene_list_count100_noshrink_0.05_padj_S_72_S.txt", sep="\t")
+```

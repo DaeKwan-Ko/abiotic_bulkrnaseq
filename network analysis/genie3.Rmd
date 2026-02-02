@@ -1,0 +1,83 @@
+```{r setup, include=FALSE, echo=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "/Users/dkko/xxxx/")
+rm(list=ls()) # Remove everything from the R environment. Important if you have some variables saved already
+```
+
+```{r loadLibs}
+library(GENIE3)
+```
+
+
+```{r input.file.prep1}
+# data matrix
+# input: expression of normalized log2FC values for each sample
+# Each row of that matrix must correspond to a gene and each column must correspond to a sample. The gene names must be specified in rownames(exprMatr). The sample names can be specified in colnames(exprMatr), but this is not mandatory.
+r_pink <- read.table("genie3 input_root pink.txt", header=TRUE, sep ="\t")
+s_grey60 <- read.table("genie3 input_shoot grey60.txt", header=TRUE, sep ="\t")
+
+head(r_pink)
+head(s_grey60)
+
+rnames_r_pink <- r_pink[,1]
+rnames_s_grey60 <- s_grey60[,1]
+```
+
+
+
+```{r input.file.prep2}
+dm_r_pink <- data.matrix(r_pink[,2:ncol(r_pink)])
+dm_s_grey60 <- data.matrix(s_grey60[,2:ncol(s_grey60)])
+
+rownames(dm_r_pink) <- rnames_r_pink
+rownames(dm_s_grey60) <- rnames_s_grey60
+
+# create expression matrix
+exprMatr_r_pink <- data.matrix(dm_r_pink)
+exprMatr_s_grey60 <- data.matrix(dm_s_grey60)
+
+head(exprMatr_r_pink)
+
+colnames(exprMatr_r_pink) <- paste("Sample", 1:12, sep = "")
+colnames(exprMatr_s_grey60) <- paste("Sample", 1:12, sep = "")
+
+head(exprMatr_r_pink)
+
+# prepare list of sorghum TFs, TFs included in the corresponding expression matrix
+tf_r_pink <-read.table("tf_included in root pink.txt", header=TRUE, sep ="\t")
+tf_s_grey60 <-read.table("tf_included in shoot grey60.txt", header=TRUE, sep ="\t")
+
+head(tf_r_pink)
+
+regulators_r_pink <- c(tf_r_pink$tracking_id)
+regulators_s_grey60 <- c(tf_s_grey60$tracking_id)
+
+head(regulators_r_pink)
+```
+
+# File out: 1. three weigh matrix: (wm_r_darkgrey...)
+#           2. The same link lists file as tab-delimited files: (toplinkList_r_darkgrey.txt...)
+
+```{r weight.matrix}
+# weigh matrix (wm) 
+set.seed(123) # For reproducibility of results
+wm_r_pink <- GENIE3(exprMatr_r_pink, regulators = regulators_r_pink, K = "sqrt")
+wm_s_grey60 <- GENIE3(exprMatr_s_grey60, regulators = regulators_s_grey60, K = "sqrt")
+
+
+top_links3 <- 1000
+
+# top 1000
+toplinkList3_r_pink <- getLinkList(wm_r_pink, reportMax = top_links3)
+toplinkList3_s_grey60 <- getLinkList(wm_s_grey60, reportMax = top_links3)
+
+dim(toplinkList3_r_pink)
+head(toplinkList3_r_pink)
+
+# save data to import to Cytoscape.
+write.table(toplinkList3_r_pink, file = "toplinkList.1000_root_pink.txt", quote = F, sep = "\t", row.names = F)
+write.table(toplinkList3_s_grey60, file = "toplinkList.1000_shoot_grey60.txt", quote = F, sep = "\t", row.names = F)
+```
+
+
+

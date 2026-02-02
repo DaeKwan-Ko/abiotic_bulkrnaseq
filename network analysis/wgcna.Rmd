@@ -1,3 +1,45 @@
+---
+title: "WGCNA"
+author: "Dae Kwan Ko"
+date: "02/02/2026"
+output: html_document
+---
+
+## R Markdown
+
+```{r setup, include=FALSE, echo=FALSE}
+require("knitr")
+opts_knit$set(root.dir = "/Users/LOCAL DIRECTORY")
+# By default, the working directory for R code chunks is the directory that contains the Rmd document. 
+rm(list=ls()) # Remove everything from the R environment. Important if you have some variables saved already
+# Display the current working directory
+getwd();
+```
+
+
+```{r loadLibs}
+# if (!requireNamespace("BiocManager", quietly = TRUE))
+# install.packages("BiocManager")
+# BiocManager::install("impute")
+# BiocManager::install("preprocessCore")
+# BiocManager::install("GO.db")
+# BiocManager::install("AnnotationDbi")
+# BiocManager::install("WGCNA")
+require(WGCNA)
+require(flashClust)
+require(RColorBrewer)
+require(RColorBrewer)
+require(gplots)
+require(ggplot2)
+require(pheatmap)
+## Load the required libraries.
+# lnames = load(file = "/Users/dkko/Google Drive/My Drive/Research/1_Brandizzi Lab_MSU/*Project_GLBRC/1_Gene regulation dynamics in sorghum stem/RNAseq_sorghum.stem_TPJ2016/WGCNA/WGCNA_full.data.RData");
+#The variable lnames contains the names of loaded variables.
+# lnames
+```
+
+
+
 ```{r input.file.prep}
 options(stringsAsFactors = FALSE)
 df <- read.table("WGCNA input_log2fc.txt", header=TRUE, sep ="\t")

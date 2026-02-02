@@ -1,7 +1,5 @@
 # abiotic_bulkrnaseq
-Scripts for Decoding Abiotic Stress Resilience in Sorghum: A Transcriptomic Framework for Climate-Ready Crops
-
-This repository contains scripts used in the paper by Ko and Brandizzi (currently under review).
+This repository contains scripts used in the following paper by Ko and Brandizzi (currently under review).
 
 Title: A Tissue-Resolved, Network-Based Transcriptomic Framework for Abiotic Stress Responses in Sorghum
 
@@ -23,11 +21,11 @@ Cufflinks (v1.3.0)
 R (v3.4.0)
 Integrative Genome Browser (v2.5.0)
 
-wgcna/
+network analysis/wgcna.Rmd
 
 Contains scripts for coexpression network analysis using WGCNA. For detailed information, please refer to our previous book chapter (https://link.springer.com/protocol/10.1007/978-1-0716-2784-6_27) and the WGCNA GitHub page (https://github.com/DaeKwan-Ko/WGCNA), which provides full details about the scripts.
 
-genie3/
+network analysis/genie3.Rmd
 
 Contains scripts for gene regulatory network analysis using GENIE3.
 

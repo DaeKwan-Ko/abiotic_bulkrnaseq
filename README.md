@@ -3,7 +3,7 @@ Scripts for Decoding Abiotic Stress Resilience in Sorghum: A Transcriptomic Fram
 
 This repository contains scripts used in the paper by Ko and Brandizzi (currently under review).
 
-Title: Decoding Abiotic Stress Resilience in Sorghum: A Transcriptomic Framework for Climate-Ready Crops
+Title: A Tissue-Resolved, Network-Based Transcriptomic Framework for Abiotic Stress Responses in Sorghum
 
 Overview
 
